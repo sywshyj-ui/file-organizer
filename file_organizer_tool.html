@@ -1,0 +1,167 @@
+
+<h2 class="sr-only">文件自动整理工具 — 可按类型自动分类并重命名文件</h2>
+
+<div style="padding: 1.5rem 0;">
+
+<div style="display:flex; align-items:center; gap:10px; margin-bottom:1.5rem;">
+  <i class="ti ti-folder-cog" style="font-size:24px; color:var(--color-text-secondary)" aria-hidden="true"></i>
+  <div>
+    <div style="font-size:18px; font-weight:500; color:var(--color-text-primary)">文件自动整理工具</div>
+    <div style="font-size:13px; color:var(--color-text-secondary)">拖入文件，自动分类 + 智能重命名</div>
+  </div>
+</div>
+
+<div id="drop-zone" style="border:1.5px dashed var(--color-border-secondary); border-radius:var(--border-radius-lg); padding:2rem; text-align:center; cursor:pointer; transition:background 0.2s; margin-bottom:1.5rem;" onclick="document.getElementById('file-input').click()" ondragover="event.preventDefault(); this.style.background='var(--color-background-secondary)'" ondragleave="this.style.background=''" ondrop="handleDrop(event)">
+  <i class="ti ti-upload" style="font-size:32px; color:var(--color-text-tertiary); display:block; margin-bottom:8px" aria-hidden="true"></i>
+  <div style="font-size:14px; color:var(--color-text-secondary)">点击或拖入文件</div>
+  <div style="font-size:12px; color:var(--color-text-tertiary); margin-top:4px">支持任意文件类型</div>
+  <input type="file" id="file-input" multiple style="display:none" onchange="handleFiles(this.files)">
+</div>
+
+<div style="margin-bottom:1rem;">
+  <div style="font-size:13px; font-weight:500; color:var(--color-text-secondary); margin-bottom:8px;">重命名规则</div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+      <input type="checkbox" id="rule-date" checked> 加入日期前缀
+    </label>
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+      <input type="checkbox" id="rule-lower" checked> 名称转小写
+    </label>
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+      <input type="checkbox" id="rule-space"> 空格替换为下划线
+    </label>
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+      <input type="checkbox" id="rule-seq"> 加入序号
+    </label>
+  </div>
+</div>
+
+<div id="file-list" style="display:none; margin-bottom:1rem;">
+  <div style="font-size:13px; font-weight:500; color:var(--color-text-secondary); margin-bottom:8px;">文件预览</div>
+  <div id="file-items"></div>
+</div>
+
+<div id="stats" style="display:none; display:none; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:1rem;">
+  <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem; text-align:center;">
+    <div style="font-size:22px; font-weight:500;" id="stat-total">0</div>
+    <div style="font-size:12px; color:var(--color-text-secondary);">总文件数</div>
+  </div>
+  <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem; text-align:center;">
+    <div style="font-size:22px; font-weight:500;" id="stat-cats">0</div>
+    <div style="font-size:12px; color:var(--color-text-secondary);">文件夹数</div>
+  </div>
+  <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem; text-align:center;">
+    <div style="font-size:22px; font-weight:500;" id="stat-renamed">0</div>
+    <div style="font-size:12px; color:var(--color-text-secondary);">已重命名</div>
+  </div>
+</div>
+
+<button id="export-btn" style="display:none; width:100%; padding:10px; border-radius:var(--border-radius-md);" onclick="exportResult()">
+  <i class="ti ti-download" style="margin-right:6px" aria-hidden="true"></i>导出整理报告
+</button>
+
+</div>
+
+<script>
+const categories = {
+  '图片': ['jpg','jpeg','png','gif','webp','svg','bmp','heic'],
+  '文档': ['pdf','doc','docx','txt','md','ppt','pptx','xls','xlsx','pages','numbers'],
+  '视频': ['mp4','mov','avi','mkv','wmv','flv'],
+  '音频': ['mp3','wav','flac','aac','ogg','m4a'],
+  '代码': ['js','ts','py','java','cpp','c','html','css','json','xml','sh','rb','go'],
+  '压缩包': ['zip','rar','7z','tar','gz'],
+  '其他': []
+};
+
+const catIcons = {'图片':'ti-photo','文档':'ti-file-text','视频':'ti-video','音频':'ti-music','代码':'ti-code','压缩包':'ti-archive','其他':'ti-file'};
+
+let processedFiles = [];
+
+function getCategory(ext) {
+  for(const [cat, exts] of Object.entries(categories)) {
+    if(exts.includes(ext.toLowerCase())) return cat;
+  }
+  return '其他';
+}
+
+function getNewName(file, index) {
+  let name = file.name;
+  const dotIdx = name.lastIndexOf('.');
+  let base = dotIdx >= 0 ? name.slice(0, dotIdx) : name;
+  const ext = dotIdx >= 0 ? name.slice(dotIdx) : '';
+  if(document.getElementById('rule-lower').checked) base = base.toLowerCase();
+  if(document.getElementById('rule-space').checked) base = base.replace(/\s+/g, '_');
+  const today = new Date();
+  const dateStr = today.getFullYear() + String(today.getMonth()+1).padStart(2,'0') + String(today.getDate()).padStart(2,'0');
+  if(document.getElementById('rule-date').checked) base = dateStr + '_' + base;
+  if(document.getElementById('rule-seq').checked) base = String(index+1).padStart(3,'0') + '_' + base;
+  return base + ext;
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').style.background = '';
+  handleFiles(e.dataTransfer.files);
+}
+
+function handleFiles(files) {
+  processedFiles = Array.from(files).map((f, i) => {
+    const ext = f.name.includes('.') ? f.name.split('.').pop() : '';
+    const cat = getCategory(ext);
+    return { file: f, ext, cat, newName: getNewName(f, i) };
+  });
+  renderList();
+}
+
+function renderList() {
+  if(!processedFiles.length) return;
+  const list = document.getElementById('file-list');
+  const items = document.getElementById('file-items');
+  list.style.display = 'block';
+  const stats = document.getElementById('stats');
+  stats.style.display = 'grid';
+  document.getElementById('export-btn').style.display = 'block';
+
+  const cats = new Set(processedFiles.map(f=>f.cat));
+  document.getElementById('stat-total').textContent = processedFiles.length;
+  document.getElementById('stat-cats').textContent = cats.size;
+  document.getElementById('stat-renamed').textContent = processedFiles.length;
+
+  items.innerHTML = processedFiles.map((f,i) => `
+    <div style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:0.5px solid var(--color-border-tertiary);">
+      <i class="ti ${catIcons[f.cat]}" style="font-size:18px; color:var(--color-text-secondary); flex-shrink:0" aria-hidden="true"></i>
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:13px; color:var(--color-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${f.file.name}</div>
+        <div style="font-size:12px; color:var(--color-text-tertiary); margin-top:2px;">→ <span style="color:var(--color-text-info)">${f.cat}/</span>${f.newName}</div>
+      </div>
+      <span style="font-size:11px; background:var(--color-background-secondary); color:var(--color-text-secondary); padding:2px 8px; border-radius:var(--border-radius-md); flex-shrink:0;">${f.cat}</span>
+    </div>
+  `).join('');
+}
+
+function exportResult() {
+  if(!processedFiles.length) return;
+  const cats = {};
+  processedFiles.forEach(f => {
+    if(!cats[f.cat]) cats[f.cat] = [];
+    cats[f.cat].push(f);
+  });
+  let text = '文件整理报告\n生成时间：' + new Date().toLocaleString('zh-CN') + '\n\n';
+  text += '=== 整理统计 ===\n';
+  text += '总文件数：' + processedFiles.length + '\n';
+  text += '文件夹数：' + Object.keys(cats).length + '\n\n';
+  text += '=== 分类详情 ===\n';
+  for(const [cat, files] of Object.entries(cats)) {
+    text += '\n📁 ' + cat + '/ (' + files.length + ' 个文件)\n';
+    files.forEach(f => {
+      text += '  ' + f.file.name + ' → ' + f.newName + '\n';
+    });
+  }
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = '整理报告_' + Date.now() + '.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
